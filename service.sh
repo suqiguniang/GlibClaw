@@ -37,6 +37,12 @@ fi
 pkill -f doh-proxy.mjs 2>/dev/null || true
 sleep 0.3
 
+# Ensure /tmp exists (root FS may be read-only on Android)
+# Try tmpfs mount; if it fails, rely on dist patches + os.tmpdir() override
+mkdir -p /tmp 2>/dev/null || true
+mount -t tmpfs -o mode=1777,size=256m tmpfs /tmp 2>/dev/null || true
+chmod 1777 /tmp 2>/dev/null || true
+
 echo "[$(date '+%H:%M:%S')] Starting DoH proxy on port $DOH_PORT..." >> "$LOG"
 
 DOH_PORT=$DOH_PORT DOH_UPSTREAM="https://dns.alidns.com/dns-query" "$NODE_BIN" "$DOH_PROXY" >> "$LOG" 2>&1 &

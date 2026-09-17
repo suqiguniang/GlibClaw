@@ -287,6 +287,11 @@ os.cpus = function cpus() {
 if (!process.env.HOME || process.env.HOME === '/') {
   process.env.HOME = '/data/adb/openclaw/home';
 }
+
+// Fix 5: os.tmpdir() -> /data/adb/openclaw/tmp (Android has no /tmp)
+const OPENCLAW_TMP = '/data/adb/openclaw/tmp';
+try { if (!fs.existsSync(OPENCLAW_TMP)) fs.mkdirSync(OPENCLAW_TMP, { recursive: true }); } catch (_) {}
+os.tmpdir = function tmpdir() { return OPENCLAW_TMP; };
 COMPAT
   log "compat.js created"
 
@@ -474,6 +479,24 @@ if [ -f "$ENTRY_JS" ]; then
 else
   log "entry.js not found at $ENTRY_JS, skipping patch"
 fi
+
+# ── Patch hardcoded /tmp paths in dist files ──────
+# openclaw hardcodes /tmp for lock files; Android has no /tmp
+log "Patching /tmp paths in dist files..."
+find "$OPENCLAW_DIR/dist" -type f \( -name "*.mjs" -o -name "*.js" \) 2>/dev/null | while read -r f; do
+  grep -q '"/tmp' "$f" 2>/dev/null || continue
+  sed -i 's|"/tmp/openclaw"|"/data/adb/openclaw/tmp"|g' "$f" 2>/dev/null
+  sed -i 's|"/tmp/openclaw/|"/data/adb/openclaw/tmp/|g' "$f" 2>/dev/null
+  sed -i 's|: "/tmp";|: "/data/adb/openclaw/tmp";|g' "$f" 2>/dev/null
+done
+# Also patch config-doctor subdirectory
+find "$OPENCLAW_DIR/dist/config-doctor" -type f -name "*.js" 2>/dev/null | while read -r f; do
+  grep -q '"/tmp' "$f" 2>/dev/null || continue
+  sed -i 's|"/tmp/openclaw"|"/data/adb/openclaw/tmp"|g' "$f" 2>/dev/null
+  sed -i 's|"/tmp/openclaw/|"/data/adb/openclaw/tmp/|g' "$f" 2>/dev/null
+  sed -i 's|: "/tmp";|: "/data/adb/openclaw/tmp";|g' "$f" 2>/dev/null
+done
+log "dist /tmp paths patched"
 
 # ── Default config ─────────────────────────────────
 CONF="$INSTALL_DIR/home/.openclaw/openclaw.json"
