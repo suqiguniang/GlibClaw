@@ -39,7 +39,7 @@ sleep 0.3
 
 echo "[$(date '+%H:%M:%S')] Starting DoH proxy on port $DOH_PORT..." >> "$LOG"
 
-DOH_PORT=$DOH_PORT "$NODE_BIN" "$DOH_PROXY" >> "$LOG" 2>&1 &
+DOH_PORT=$DOH_PORT DOH_UPSTREAM="https://dns.alidns.com/dns-query" "$NODE_BIN" "$DOH_PROXY" >> "$LOG" 2>&1 &
 DOH_PID=$!
 echo $DOH_PID > "$INSTALL_DIR/doh-proxy.pid"
 

@@ -6,7 +6,7 @@ GLIBC_TAR="$MODPATH/glibc.tar.xz"
 GLIBC_DIR="$INSTALL_DIR/glibc/lib"
 NODE_DIR="$INSTALL_DIR/node"
 DOH_PROXY_SRC="$MODPATH/openclaw/doh-proxy.mjs"
-NODE_BASE_URL="${NODE_BASE_URL:-https://nodejs.org/dist}"
+NODE_BASE_URL="${NODE_BASE_URL:-https://npmmirror.com/mirrors/node}"
 DOH_PORT=5300
 
 abort() { ui_print ""; ui_print "ERROR: $1"; ui_print "Log: $LOG"; exit 1; }
@@ -70,6 +70,16 @@ cp "$DOH_PROXY_SRC" "$INSTALL_DIR/doh-proxy.mjs"
 chmod 644 "$INSTALL_DIR/doh-proxy.mjs"
 log "doh-proxy.mjs installed"
 
+# ── Check for offline bundle ──────────────────────
+NODE_TAR_BUNDLED="$MODPATH/node.tar.gz"
+OPENCLAW_BUNDLE="$MODPATH/openclaw-modules.tar.gz"
+OFFLINE_MODE=false
+if [ -f "$NODE_TAR_BUNDLED" ] && [ -f "$OPENCLAW_BUNDLE" ]; then
+  OFFLINE_MODE=true
+  ui_print "Offline mode: using bundled assets"
+  log "offline mode enabled (bundled assets detected)"
+fi
+
 # ── Add default route if missing ───────────────────
 if ! ip route show | grep -q "^default"; then
   for iface in rmnet_data1 rmnet_data0 rmnet_data3 wlan0 eth0; do
@@ -81,46 +91,49 @@ if ! ip route show | grep -q "^default"; then
 fi
 
 # ── Wait for basic network (native DNS) ────────────
-ui_print "Waiting for network..."
-RETRY=0
-while :; do
-  if ping -c 1 -W 3 8.8.8.8 >/dev/null 2>&1; then
-    break
-  fi
-  RETRY=$((RETRY+1))
-  [ $RETRY -ge 45 ] && abort "Network not ready after 90 seconds"
-  sleep 2
-done
-log "network ready (native DNS, ${RETRY}s wait)"
+if [ "$OFFLINE_MODE" = false ]; then
+  ui_print "Waiting for network..."
+  RETRY=0
+  while :; do
+    if ping -c 1 -W 3 8.8.8.8 >/dev/null 2>&1; then
+      break
+    fi
+    RETRY=$((RETRY+1))
+    [ $RETRY -ge 45 ] && abort "Network not ready after 90 seconds"
+    sleep 2
+  done
+  log "network ready (native DNS, ${RETRY}s wait)"
+else
+  ui_print "Skipping network check (offline mode)"
+  log "network check skipped (offline mode)"
+fi
 
 # ── Detect Node.js version ─────────────────────────
-ui_print "Detecting latest Node.js LTS version..."
-# Auto-detect latest Node.js LTS version if not specified
-if [ -z "$NODE_VERSION" ]; then
-  # Try to fetch latest LTS version from nodejs.org
-  # Use dist-index.json which lists all versions, filter for v22.x (current LTS)
-  LATEST_NODE=""
-  if command -v curl >/dev/null 2>&1; then
-    # Get latest v22.x version (Iron LTS)
-    LATEST_NODE=$(curl -fsSL --max-time 10 https://nodejs.org/dist/index.json 2>/dev/null | \
-      grep -o '"version":"v22\.[0-9]*\.[0-9]*"' | head -1 | cut -d'"' -f4)
-  elif command -v busybox >/dev/null 2>&1; then
-    LATEST_NODE=$(busybox wget -qO- --timeout=10 https://nodejs.org/dist/index.json 2>/dev/null | \
-      grep -o '"version":"v22\.[0-9]*\.[0-9]*"' | head -1 | cut -d'"' -f4)
-  fi
-  
-  if [ -n "$LATEST_NODE" ]; then
-    NODE_VERSION="$LATEST_NODE"
-    ui_print "Latest Node.js LTS (v22.x): $NODE_VERSION"
-    log "Auto-detected Node.js LTS version: $NODE_VERSION"
+if [ "$OFFLINE_MODE" = false ]; then
+  ui_print "Detecting latest Node.js LTS version..."
+  if [ -z "$NODE_VERSION" ]; then
+    LATEST_NODE=""
+    if command -v curl >/dev/null 2>&1; then
+      LATEST_NODE=$(curl -fsSL --max-time 10 https://npmmirror.com/mirrors/node/index.json 2>/dev/null | \
+        grep -o '"version":"v22\.[0-9]*\.[0-9]*"' | head -1 | cut -d'"' -f4)
+    elif command -v busybox >/dev/null 2>&1; then
+      LATEST_NODE=$(busybox wget -qO- --timeout=10 https://npmmirror.com/mirrors/node/index.json 2>/dev/null | \
+        grep -o '"version":"v22\.[0-9]*\.[0-9]*"' | head -1 | cut -d'"' -f4)
+    fi
+
+    if [ -n "$LATEST_NODE" ]; then
+      NODE_VERSION="$LATEST_NODE"
+      ui_print "Latest Node.js LTS (v22.x): $NODE_VERSION"
+      log "Auto-detected Node.js LTS version: $NODE_VERSION"
+    else
+      NODE_VERSION="v22.19.0"
+      ui_print "Failed to detect, using fallback: $NODE_VERSION"
+      log "Failed to auto-detect Node.js, using fallback: $NODE_VERSION"
+    fi
   else
-    NODE_VERSION="v22.19.0"
-    ui_print "Failed to detect, using fallback: $NODE_VERSION"
-    log "Failed to auto-detect Node.js, using fallback: $NODE_VERSION"
+    ui_print "Using Node.js: $NODE_VERSION"
+    log "Using specified Node.js version: $NODE_VERSION"
   fi
-else
-  ui_print "Using Node.js: $NODE_VERSION"
-  log "Using specified Node.js version: $NODE_VERSION"
 fi
 
 # ════════════════════════════════════════════════════
@@ -129,21 +142,28 @@ fi
 
 if [ "$IS_UPGRADE" = false ]; then
   # ── Download Node.js ──
-  ui_print "Downloading Node.js ${NODE_VERSION}..."
-  ARCHIVE_NAME="node-${NODE_VERSION}-linux-arm64.tar.gz"
-  DOWNLOAD_URL="${NODE_BASE_URL}/${NODE_VERSION}/${ARCHIVE_NAME}"
-  log "Downloading: $DOWNLOAD_URL"
+  if [ "$OFFLINE_MODE" = true ]; then
+    ui_print "Extracting bundled Node.js..."
+    ARCHIVE_NAME="node-bundled.tar.gz"
+    cp "$NODE_TAR_BUNDLED" "$INSTALL_DIR/tmp/$ARCHIVE_NAME"
+    log "Using bundled Node.js tarball"
+  else
+    ui_print "Downloading Node.js ${NODE_VERSION}..."
+    ARCHIVE_NAME="node-${NODE_VERSION}-linux-arm64.tar.gz"
+    DOWNLOAD_URL="${NODE_BASE_URL}/${NODE_VERSION}/${ARCHIVE_NAME}"
+    log "Downloading: $DOWNLOAD_URL"
 
-  DOWNLOAD_OK=0
-  if command -v curl >/dev/null 2>&1; then
-    curl -fL --retry 3 --retry-delay 2 "$DOWNLOAD_URL" -o "$INSTALL_DIR/tmp/$ARCHIVE_NAME" && DOWNLOAD_OK=1
-  elif command -v busybox >/dev/null 2>&1; then
-    busybox wget --no-check-certificate -O "$INSTALL_DIR/tmp/$ARCHIVE_NAME" "$DOWNLOAD_URL" && DOWNLOAD_OK=1
+    DOWNLOAD_OK=0
+    if command -v curl >/dev/null 2>&1; then
+      curl -fL --retry 3 --retry-delay 2 "$DOWNLOAD_URL" -o "$INSTALL_DIR/tmp/$ARCHIVE_NAME" && DOWNLOAD_OK=1
+    elif command -v busybox >/dev/null 2>&1; then
+      busybox wget --no-check-certificate -O "$INSTALL_DIR/tmp/$ARCHIVE_NAME" "$DOWNLOAD_URL" && DOWNLOAD_OK=1
+    fi
+
+    [ $DOWNLOAD_OK -eq 1 ] || abort "Failed to download Node.js from $DOWNLOAD_URL"
   fi
-
-  [ $DOWNLOAD_OK -eq 1 ] || abort "Failed to download Node.js from $DOWNLOAD_URL"
   FILE_SIZE=$(stat -c%s "$INSTALL_DIR/tmp/$ARCHIVE_NAME" 2>/dev/null || echo "?")
-  log "downloaded: $ARCHIVE_NAME ($FILE_SIZE bytes)"
+  log "node archive: $ARCHIVE_NAME ($FILE_SIZE bytes)"
 
   # ── Extract directly into NODE_DIR ──
   ui_print "Extracting Node.js..."
@@ -306,39 +326,45 @@ fi
 #  DoH Proxy (now we have Node)
 # ════════════════════════════════════════════════════
 
-# Stop any old doh-proxy
-pkill -f doh-proxy.mjs 2>/dev/null || true
-sleep 0.3
+if [ "$OFFLINE_MODE" = false ]; then
+  # Stop any old doh-proxy
+  pkill -f doh-proxy.mjs 2>/dev/null || true
+  sleep 0.3
 
-# Start DoH proxy
-DOH_PORT=$DOH_PORT "$NODE_DIR/bin/node" "$INSTALL_DIR/doh-proxy.mjs" >> "$LOG" 2>&1 &
-DOH_PID=$!
-sleep 2
+  # Start DoH proxy (Aliyun DoH upstream for China)
+  DOH_PORT=$DOH_PORT DOH_UPSTREAM="https://dns.alidns.com/dns-query" \
+    "$NODE_DIR/bin/node" "$INSTALL_DIR/doh-proxy.mjs" >> "$LOG" 2>&1 &
+  DOH_PID=$!
+  sleep 2
 
-if kill -0 $DOH_PID 2>/dev/null; then
-  log "DoH proxy running PID=$DOH_PID"
+  if kill -0 $DOH_PID 2>/dev/null; then
+    log "DoH proxy running PID=$DOH_PID"
+  else
+    log "WARNING: DoH proxy failed to start"
+  fi
+
+  # Apply iptables DNS redirect
+  iptables -t nat -D OUTPUT -p udp --dport 53 -j REDIRECT --to-port $DOH_PORT 2>/dev/null || true
+  iptables -t nat -D OUTPUT -p tcp --dport 53 -j REDIRECT --to-port $DOH_PORT 2>/dev/null || true
+  iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-port $DOH_PORT
+  iptables -t nat -A OUTPUT -p tcp --dport 53 -j REDIRECT --to-port $DOH_PORT
+  log "iptables DNS redirect 53->$DOH_PORT applied"
+
+  # Wait for DNS to work through proxy
+  if kill -0 $DOH_PID 2>/dev/null; then
+    RETRY=0
+    while [ $RETRY -lt 30 ]; do
+      if ping -c 1 -W 3 registry.npmmirror.com >/dev/null 2>&1; then
+        log "DNS via DoH proxy working"
+        break
+      fi
+      RETRY=$((RETRY+1))
+      sleep 2
+    done
+  fi
 else
-  log "WARNING: DoH proxy failed to start"
-fi
-
-# Apply iptables DNS redirect
-iptables -t nat -D OUTPUT -p udp --dport 53 -j REDIRECT --to-port $DOH_PORT 2>/dev/null || true
-iptables -t nat -D OUTPUT -p tcp --dport 53 -j REDIRECT --to-port $DOH_PORT 2>/dev/null || true
-iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-port $DOH_PORT
-iptables -t nat -A OUTPUT -p tcp --dport 53 -j REDIRECT --to-port $DOH_PORT
-log "iptables DNS redirect 53->$DOH_PORT applied"
-
-# Wait for DNS to work through proxy
-if kill -0 $DOH_PID 2>/dev/null; then
-  RETRY=0
-  while [ $RETRY -lt 30 ]; do
-    if ping -c 1 -W 3 registry.npmjs.org >/dev/null 2>&1; then
-      log "DNS via DoH proxy working"
-      break
-    fi
-    RETRY=$((RETRY+1))
-    sleep 2
-  done
+  log "Skipping DoH proxy (offline mode)"
+  ui_print "Skipping DNS proxy (offline mode)"
 fi
 
 # ════════════════════════════════════════════════════
@@ -354,7 +380,20 @@ mkdir -p "$npm_config_cache"
 rm -rf "$INSTALL_DIR/lib/node_modules/openclaw"
 rm -f  "$INSTALL_DIR/bin/openclaw"
 
-ui_print "Installing OpenClaw..."
+if [ "$OFFLINE_MODE" = true ]; then
+  ui_print "Extracting bundled OpenClaw..."
+  mkdir -p "$INSTALL_DIR/lib"
+  tar -xzf "$OPENCLAW_BUNDLE" -C "$INSTALL_DIR/lib" || \
+    abort "Failed to extract openclaw bundle"
+
+  if [ -f "$INSTALL_DIR/lib/node_modules/openclaw/openclaw.mjs" ]; then
+    OPENCLAW_MJS="$INSTALL_DIR/lib/node_modules/openclaw/openclaw.mjs"
+    log "openclaw.mjs found at $OPENCLAW_MJS (offline)"
+  else
+    abort "openclaw.mjs not found in offline bundle"
+  fi
+else
+  ui_print "Installing OpenClaw..."
 ATTEMPT=0
 INSTALL_OK=0
 while [ $ATTEMPT -lt 3 ]; do
@@ -366,6 +405,7 @@ while [ $ATTEMPT -lt 3 ]; do
   esac
 
   "$NODE_DIR/bin/npm" install -g openclaw \
+    --registry=https://registry.npmmirror.com \
     --prefer-online \
     --omit=optional \
     --ignore-scripts \
@@ -396,6 +436,7 @@ while [ $ATTEMPT -lt 3 ]; do
 done
 
 [ $INSTALL_OK -eq 1 ] || abort "npm install failed after 3 attempts"
+fi
 
 # ── Create openclaw binary wrapper ─────────────────
 mkdir -p "$INSTALL_DIR/bin"

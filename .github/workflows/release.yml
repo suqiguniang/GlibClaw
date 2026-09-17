@@ -1,0 +1,85 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.3)'
+        required: true
+        default: 'v1.0.3'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(grep '^version=' module.prop | cut -d= -f2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build proxy version (国内代理加速版)
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p dist
+          zip -r "dist/GlibClaw-v${VERSION}-proxy.zip" . \
+            -x ".git/*" ".github/*" ".gitignore" ".zcode/*" \
+               "node.tar.gz" "openclaw-modules.tar.gz" "openclaw-modules.tar.gz.new" \
+               "scripts/*" "prepare-offline.sh" "dist/*" "*.tmp" "*.log"
+
+      - name: Prepare offline bundle
+        env:
+          # Use official sources on CI for speed; customize for China
+          MIRROR: https://nodejs.org/dist
+          REGISTRY: https://registry.npmjs.org
+        run: bash prepare-offline.sh
+
+      - name: Build offline version (内嵌离线版)
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          zip -r "dist/GlibClaw-v${VERSION}-offline.zip" . \
+            -x ".git/*" ".github/*" ".gitignore" ".zcode/*" \
+               "openclaw-modules.tar.gz.new" \
+               "scripts/*" "prepare-offline.sh" "dist/*" "*.tmp" "*.log"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: GlibClaw ${{ github.event.inputs.tag || github.ref_name }}
+          body: |
+            ## 下载说明
+
+            | 文件 | 说明 |
+            |------|------|
+            | `GlibClaw-v${{ steps.version.outputs.version }}-proxy.zip` | **国内代理加速版** — 刷入后从 npmmirror 镜像下载 Node.js 和 OpenClaw |
+            | `GlibClaw-v${{ steps.version.outputs.version }}-offline.zip` | **内嵌离线版** — 全部资源已内嵌，无需联网 |
+
+            ### 使用方法
+            1. 下载对应的 zip 文件
+            2. 通过 Magisk / KernelSU 刷入
+            3. 重启
+
+            ### 镜像源
+            - Node.js: `npmmirror.com/mirrors/node`
+            - npm registry: `registry.npmmirror.com`
+            - DoH: `dns.alidns.com`（阿里 DNS）
+          files: |
+            dist/GlibClaw-v${{ steps.version.outputs.version }}-proxy.zip
+            dist/GlibClaw-v${{ steps.version.outputs.version }}-offline.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

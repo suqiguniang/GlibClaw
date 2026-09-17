@@ -5,7 +5,7 @@
 import dgram from 'dgram';
 
 const DOH_PORT = parseInt(process.env.DOH_PORT || '5300');
-const DOH_UPSTREAM = process.env.DOH_UPSTREAM || 'https://8.8.8.8/dns-query';
+const DOH_UPSTREAM = process.env.DOH_UPSTREAM || 'https://dns.alidns.com/dns-query';
 const TIMEOUT_MS = parseInt(process.env.DOH_TIMEOUT || '5000');
 
 const server = dgram.createSocket('udp4');
