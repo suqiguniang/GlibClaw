@@ -444,7 +444,9 @@ OPENCLAW_WRAPPER="$INSTALL_DIR/bin/openclaw"
 printf '#!/system/bin/sh\n'                                                  > "$OPENCLAW_WRAPPER"
 printf 'export PATH="%s/bin:$PATH"\n'                   "$NODE_DIR"         >> "$OPENCLAW_WRAPPER"
 printf 'export HOME="%s/home"\n'                        "$INSTALL_DIR"      >> "$OPENCLAW_WRAPPER"
+printf 'export TMPDIR="%s/tmp"\n'                       "$INSTALL_DIR"      >> "$OPENCLAW_WRAPPER"
 printf 'export npm_config_prefix="%s"\n'                "$INSTALL_DIR"      >> "$OPENCLAW_WRAPPER"
+printf 'mkdir -p "$TMPDIR" 2>/dev/null\n'                                   >> "$OPENCLAW_WRAPPER"
 printf 'exec "%s/bin/node" "%s" "$@"\n' "$NODE_DIR" "$OPENCLAW_MJS" >> "$OPENCLAW_WRAPPER"
 chmod 755 "$OPENCLAW_WRAPPER"
 log "openclaw wrapper created"
@@ -507,7 +509,7 @@ log "DoH proxy stopped (will restart via service.sh on reboot)"
 set_perm "$MODPATH/system/bin/openclaw"         root root 0755
 set_perm "$MODPATH/system/bin/openclaw.service" root root 0755
 
-rm -rf "$INSTALL_DIR/tmp"
+mkdir -p "$INSTALL_DIR/tmp"
 chmod 755 "$OPENCLAW_WRAPPER"
 chmod 600 "$CONF"
 echo "done" > "$INSTALL_DIR/.install_state"
