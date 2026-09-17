@@ -14,7 +14,7 @@
 # ============================================================
 set -euo pipefail
 
-NODE_VERSION="${1:-v22.19.0}"
+NODE_VERSION="${1:-v22.23.2}"
 MIRROR="${MIRROR:-https://npmmirror.com/mirrors/node}"
 REGISTRY="${REGISTRY:-https://registry.npmmirror.com}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

@@ -126,7 +126,7 @@ if [ "$OFFLINE_MODE" = false ]; then
       ui_print "Latest Node.js LTS (v22.x): $NODE_VERSION"
       log "Auto-detected Node.js LTS version: $NODE_VERSION"
     else
-      NODE_VERSION="v22.19.0"
+      NODE_VERSION="v22.23.2"
       ui_print "Failed to detect, using fallback: $NODE_VERSION"
       log "Failed to auto-detect Node.js, using fallback: $NODE_VERSION"
     fi
